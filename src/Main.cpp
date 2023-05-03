@@ -52,9 +52,20 @@ SDL_Texture * south_east = NULL;
 
 SDL_Texture * startImg = NULL;
 SDL_Texture * replayImg = NULL;
-bool start = false;
+
+SDL_Texture * menu_bg = NULL;
+SDL_Texture * start_button = NULL;
+SDL_Texture * quit_button = NULL;
+SDL_Texture * replay_button = NULL;
+
+bool start = true;
 
 SDL_Rect filled_rect;
+
+int MENU = 0;
+int GAME = 1;
+
+int screen = MENU;
 
 
 void logSDLError(std::ostream& os, 
@@ -77,8 +88,6 @@ SDL_Rect getTile(Point point) { SDL_Rect tile = {point.j, point.i, BLOCK_SIZE, B
 class Snake {
 private:
 
-    vector<SDL_Texture*> body;
-
     vector<Point> queue;
     vector<int> snake_dir;
     int board[N][M];
@@ -95,6 +104,7 @@ public:
     bool isDie() { return die; };
     void setDie(bool flag) { die = flag; };
 
+    // Reset lại rắn từ đầu
     void reset() {
         queue.clear();
         queue.push_back(Point(4,4));
@@ -114,11 +124,13 @@ public:
 
     int getFoodNums() { return food_nums; };
 
+    // Đổi hướng
     void changeDir(vector<int> new_dir) { 
         if (snake_dir[0] + new_dir[0] == 0 and snake_dir[1] + new_dir[1] == 0) return; 
         snake_dir = new_dir;
     }
 
+    // Kiểm tra xem có đâm vào thân rắn hay không
     bool collision(int i, int j) { 
         if ( i < 0 or j < 0 or i >= N or j >= M) return true; 
         for (int t = 0; t < queue.size(); t++) {
@@ -127,6 +139,7 @@ public:
         return false;
     };
     
+    // tạo ngẫu nhiên thức ăn
     void randomFood() {
         vector<Point> coors;
         for (int i = 0; i < N; i++) {
@@ -143,32 +156,48 @@ public:
         food[1] = coors[res].j;
     }
 
+    // kiểm tra có ăn vào ô có quả táo không
     bool eatFood(int i, int j) { return i == food[0] and j == food[1]; }
 
+
+    // Hàm di chuyển
     void move() {
         Point head = queue.back();
 
-        Point newHead = Point(head.i + snake_dir[0], head.j + snake_dir[1]);
+        // Vị trí mới của đầu sau khi di chuyển
+        Point newHead = Point((head.i + snake_dir[0] + N) % N, (head.j + snake_dir[1] + M) % M);
 
+        // Kiểm tra xem có va chạm gì không, nếu không thì nhét vị trí mới của đầu vào
         if (!collision(newHead.i, newHead.j)) {
 
             queue.push_back(newHead);
             board[newHead.i][newHead.j] = true;
+
+            // Nếu không ăn gì thì vị trí đuôi bị xóa đi
             if (!eatFood(newHead.i, newHead.j)) {
                 board[queue[0].i][queue[0].j] = false;
                 queue.erase(queue.begin());
             } else {
+
+                // Còn không điểm + 1 và tạo food ngẫu nhiên tiếp
                 food_nums ++;
                 randomFood();
             }
         } else {
+            // Nếu va chạm thì die
+
             die = true;
         }
     }
 
+    // hàm cập nhật xem rắn chết hay di chuyển
     void update() {
-        // if (die) return;
 
+        // Nếu chết thì quay lại không làm gì cả
+        if (die) return;
+
+
+        // Nếu không cứ sau TIME_MOVE frame thì lại di chuyển 
         counter --;
 
         if (counter == 0) {
@@ -176,12 +205,10 @@ public:
             move();
         }
 
-        if (die) {
-            reset();
-        }
     }
 
 
+    // Hàm vẽ
     void draw(SDL_Renderer * renderer) {
 
         // Vẽ đầu
@@ -212,16 +239,20 @@ public:
 
             SDL_Rect tile_rect = getTile(getCoordinate(queue[i].i, queue[i].j));
 
+            // xét từng ô xem các ô liền kề hướng như nào để vẽ thân cho phù hợp
+
             if (fi == dir["left"]) {
                 if (se == dir["right"]) SDL_RenderCopy(renderer, body_horizontal, NULL, &tile_rect);
                 if (se == dir["up"]) SDL_RenderCopy(renderer, south_east, NULL, &tile_rect);
                 if (se == dir["down"]) SDL_RenderCopy(renderer, north_east, NULL, &tile_rect);
             }
+
             if (fi == dir["right"]) {
                 if (se == dir["left"]) SDL_RenderCopy(renderer, body_horizontal, NULL, &tile_rect);
                 if (se == dir["up"]) SDL_RenderCopy(renderer, south_west, NULL, &tile_rect);
                 if (se == dir["down"]) SDL_RenderCopy(renderer, north_west, NULL, &tile_rect);
             }
+
             if (fi == dir["up"]) {
                 if (se == dir["right"]) SDL_RenderCopy(renderer, south_west, NULL, &tile_rect);
                 if (se == dir["left"]) SDL_RenderCopy(renderer, south_east, NULL, &tile_rect);
@@ -239,7 +270,7 @@ public:
 };
 
 
-void refreshScreen(SDL_Window* window, SDL_Renderer* renderer, Snake * snake);
+void refreshScreen(SDL_Window* window, SDL_Renderer* renderer, Snake * snake, bool & quit);
 
 int main(int argc, char* argv[]) {
     SDL_Window* window;
@@ -249,13 +280,14 @@ int main(int argc, char* argv[]) {
     // Your code here
     SDL_Event e;
 
-   
+    // Các hướng
     dir["left"] = {0, -1};
     dir["right"] = {0, 1};
     dir["up"] = {-1, 0};
     dir["down"] = {1, 0};
 
 
+    // Các ảnh
     bgImg = loadTexture(renderer, "res/img/bg.png");
     foodImg = loadTexture(renderer, "res/img/food.png");
     inventory = loadTexture(renderer, "res/img/inventory.png");
@@ -278,11 +310,15 @@ int main(int argc, char* argv[]) {
     south_west = loadTexture(renderer, "res/img/angle_sw.png");
     south_east = loadTexture(renderer, "res/img/angle_se.png");
 
-    startImg = loadTexture(renderer, "res/img/start.png");
-    replayImg = loadTexture(renderer, "res/img/replay.png");
+    menu_bg = loadTexture(renderer, "res/img/menu.jpg");
+    start_button = loadTexture(renderer, "res/img/start.png");
+    quit_button = loadTexture(renderer, "res/img/quit.png");
+    replay_button = loadTexture(renderer, "res/img/replay.png");
 
+
+    // khởi tạo rắn và thức ăn
     Snake * snake = new Snake();
-    snake->setDie(true);
+    snake->setDie(false);
 
     food.push_back(N / 2);
     food.push_back(M / 2);
@@ -295,15 +331,10 @@ int main(int argc, char* argv[]) {
     filled_rect.w = boardW + 4;
     filled_rect.h = boardH + 4;
 
-    // Bước nhảy mỗi khi dịch chuyển
-    int step = 4;
-    // Xoá toàn bộ màn hình và vẽ
-    refreshScreen(window, renderer, snake);
-
     bool quit = false;
 
     while (!quit) {
-        // Đợi 10 mili giây
+        // Cài FPS
         frameStart = SDL_GetTicks();
 
         while( SDL_PollEvent( &e ) != 0 ) {
@@ -311,16 +342,40 @@ int main(int argc, char* argv[]) {
             if (e.type == SDL_QUIT ) quit = true;
             
             if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_LEFT) snake->changeDir(dir["left"]);
-                if (e.key.keysym.sym == SDLK_RIGHT) snake->changeDir(dir["right"]);
-                if (e.key.keysym.sym == SDLK_DOWN) snake->changeDir(dir["down"]);
-                if (e.key.keysym.sym == SDLK_UP) snake->changeDir(dir["up"]);
+                if (screen == GAME) {
+                    if (e.key.keysym.sym == SDLK_LEFT) snake->changeDir(dir["left"]);
+                    if (e.key.keysym.sym == SDLK_RIGHT) snake->changeDir(dir["right"]);
+                    if (e.key.keysym.sym == SDLK_DOWN) snake->changeDir(dir["down"]);
+                    if (e.key.keysym.sym == SDLK_UP) snake->changeDir(dir["up"]);
+                }
+            }
+
+            // Sự kiện bàn phím
+
+            if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP ) {
+                int x, y;
+                SDL_GetMouseState( &x, &y );
+
+                if (screen == MENU) {
+                    // Bấm nút start thì chuyển sang màn hình GAME
+                    if (200 <= x and x <= 360 and 250 <= y and y <= 400) screen = GAME;
+                    // Bấm nút quít thì thoát vòng lặp và thoát game
+                    if (200 <= x and x <= 358 and 420 <= y and y <= 570) quit = true;
+                } 
+                if (screen == GAME) {
+                    // Nếu chết bấm nút Replay thì chơi lại
+                    if (!start and 380 <= x and x <= 580 and 260 <= y and y <= 580) {
+                        start = true;
+                        snake->reset();
+                    }
+                }
             }
         }
             
         // Xoá toàn bộ màn hình và vẽ lại
-        refreshScreen(window, renderer, snake);
+        refreshScreen(window, renderer, snake, quit);
 
+        // Cài FPS 60
         frameTime = SDL_GetTicks() - frameStart;
 		if (frameTime < DELAY_TIME) SDL_Delay(DELAY_TIME - frameTime);
 		
@@ -331,65 +386,79 @@ int main(int argc, char* argv[]) {
 }
 
 // Xoá và vẽ lại toàn bộ màn hình với 1 hình chữ nhật
-void refreshScreen(SDL_Window* window, SDL_Renderer* renderer, Snake * snake) {
+void refreshScreen(SDL_Window* window, SDL_Renderer* renderer, Snake * snake, bool & quit) {
     // Đặt màu vẽ thành xanh lam (blue), xoá màn hình về màu xanh lam.
     SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);   // blue
     SDL_RenderClear(renderer);
 
+    // Vẽ màn hình menu
+    if (screen == MENU) {
+        SDL_RenderCopy(renderer, menu_bg, NULL, NULL);
 
-    // Vẽ background
-    SDL_RenderCopy(renderer, bgImg, NULL, NULL);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);   // white
-    SDL_RenderDrawRect(renderer, &filled_rect);
+        // Vẽ nút start
+        SDL_Rect start_rect = {200, 250, 160, 150};
+        SDL_RenderCopy(renderer, start_button, NULL, &start_rect);
 
-    // Vẽ kho chứa táo
-    SDL_Rect inventory_rect = {670, 0, 300, 600};
-    SDL_RenderCopy(renderer, inventory, NULL, &inventory_rect);
-    int num = snake->getFoodNums();
-    int count = num;
-    int max_width = 7;
+        // Vẽ nút quit
+        SDL_Rect quit_rect = {200, 420, 158, 150};
+        SDL_RenderCopy(renderer, quit_button, NULL, &quit_rect);
 
-    for (int i = 0; i < num / max_width + 1 ; i++) {
-        for (int j = 0; j < max_width; j++) {
-            if (count > 0) {
-                count --;
-                SDL_Rect rect = {720 + j * 30, 80 + i * 30, BLOCK_SIZE, BLOCK_SIZE};
-                SDL_RenderCopy(renderer, foodImg, NULL, &rect);
+        
+    }
+
+    // Vẽ màn hình game
+    if (screen == GAME) { 
+
+        // Vẽ background
+        SDL_RenderCopy(renderer, bgImg, NULL, NULL);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);   // white
+        SDL_RenderDrawRect(renderer, &filled_rect);
+
+        // Vẽ kho chứa táo
+        SDL_Rect inventory_rect = {670, 0, 300, 600};
+        SDL_RenderCopy(renderer, inventory, NULL, &inventory_rect);
+        int num = snake->getFoodNums();
+        int count = num;
+        int max_width = 7;
+
+        for (int i = 0; i < num / max_width + 1 ; i++) {
+            for (int j = 0; j < max_width; j++) {
+                if (count > 0) {
+                    count --;
+                    SDL_Rect rect = {720 + j * 30, 80 + i * 30, BLOCK_SIZE, BLOCK_SIZE};
+                    SDL_RenderCopy(renderer, foodImg, NULL, &rect);
+                }
             }
+        }
+
+
+        // Vẽ rắn
+        snake->update();
+        snake->draw(renderer);
+
+        // Vẽ thức ăn
+        if (!snake->isDie()) {
+
+            SDL_Rect food_rect = getTile(getCoordinate(food[0], food[1]));
+            SDL_RenderCopy(renderer, foodImg, NULL, &food_rect);
+        }
+
+
+        // Vẽ nút replay
+        if (snake->isDie()) {
+            start = false;
+            
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);   // white
+
+            SDL_Rect rect = {380, 260, 200, 200};
+
+            SDL_RenderCopy(renderer, replay_button, NULL, &rect);
         }
     }
 
-
-    // Vẽ rắn
-    snake->update();
-    snake->draw(renderer);
-
-    // Vẽ thức ăn
-    if (!snake->isDie()) {
-        SDL_Rect food_rect = getTile(getCoordinate(food[0], food[1]));
-        SDL_RenderCopy(renderer, foodImg, NULL, &food_rect);
-    }
-
-
-    // Vẽ nút bắt đầu và chơi lại
-    // if (snake->isDie()) {
-    //     if (start == false) {
-
-    //         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);   // white
-
-    //         SDL_Rect rect = {430, (720 - 42)/2, 100, 42};
-
-    //         SDL_RenderCopy(renderer, startImg, NULL, &rect);
-    //     } else {
-
-    //     }
-    // }
-
     // Dùng lệnh hiển thị (đưa) hình đã vẽ ra mành hình
-   //Khi thông thường chạy với môi trường bình thường ở nhà
+    //Khi thông thường chạy với môi trường bình thường ở nhà
     SDL_RenderPresent(renderer);
-   //Khi chạy ở máy thực hành WinXP ở trường (máy ảo)
-   //SDL_UpdateWindowSurface(window);
 }
 
 
@@ -441,6 +510,8 @@ void waitUntilKeyPressed() {
     }
 }
 
+
+// Hàm load ảnh trong Lazyfoo
 SDL_Texture* loadTexture(SDL_Renderer* renderer, string path) {
     //The final texture
     SDL_Texture* newTexture = NULL;
@@ -463,14 +534,5 @@ SDL_Texture* loadTexture(SDL_Renderer* renderer, string path) {
 
     return newTexture;
 }
-
-// void close() {
-//     //Free loaded image
-//     SDL_DestroyTexture(bgImg);
-//     bgImg = NULL;
-
-//     //Quit SDL subsystems
-//     IMG_Quit();
-// }
 
 //**************************************************************
